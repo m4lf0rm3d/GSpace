@@ -12,12 +12,12 @@ class Logger:
     logger.error("This is an error message.")
     """
 
-    _logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
     file_handler = logging.FileHandler(ConfigurationManager.LOGS_FOLDER_PATH + "/" + datetime.now().strftime("%d-%m-%y") + ".log")
-    _logger.setLevel(logging.INFO)
+    logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%d-%m-%y %I:%M:%S %p')
     file_handler.setFormatter(formatter)
-    _logger.addHandler(file_handler)
+    logger.addHandler(file_handler)
     file_handler.close()
 
     def info(self, message):
