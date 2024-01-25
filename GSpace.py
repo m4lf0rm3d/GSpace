@@ -52,21 +52,25 @@ class GSpace:
             changes_in_local = local_fs_tree.find_difference_path(gdrive_tree)
             changes_in_server = gdrive_tree.find_difference_path(local_fs_tree)
             print("============================================")
+
             print("Following changes will take place in " + updateType)
 
             if updateType == "Local Filesystem":
                 print(f"Additions ({len(changes_in_server['Additions'])}):")
                 for change in changes_in_server["Additions"]: print("+", change[0])
-            else:
-                print(f"Additions ({len(changes_in_local['Additions'])}):")
-                for change in changes_in_local["Additions"]: print("+", change[0])
-
-            if updateType == "Local Filesystem":
+                print(f"Modifications ({len(changes_in_server['Modifications'])}):")
+                for change in changes_in_server["Modifications"]: print("*", change[0])
                 print(f"Deletions ({len(changes_in_server['Deletions'])}):")
                 for change in changes_in_server["Deletions"]: print("-", change[0])
             else:
+                print(f"Additions ({len(changes_in_local['Additions'])}):")
+                for change in changes_in_local["Additions"]: print("+", change[0])
+                print(f"Modifications ({len(changes_in_local['Modifications'])}):")
+                for change in changes_in_server["Modifications"]: print("*", change[0])
                 print(f"Deletions ({len(changes_in_local['Deletions'])}):")
                 for change in changes_in_local["Deletions"]: print("-", change[0])
+
+                
 
             print("============================================")
 
@@ -86,7 +90,7 @@ class GSpace:
         try:
             changes_in_local, changes_in_server, gdrive_tree, local_fs_tree = self.fetch()
 
-            if not changes_in_server["Additions"] and not changes_in_server["Deletions"]:
+            if not changes_in_server["Additions"] and not changes_in_server["Deletions"] and not changes_in_server["Modifications"]:
                 print("============================================")
                 print("No changes to pull!\nExiting ...")
                 return print("============================================")
@@ -108,7 +112,16 @@ class GSpace:
                 for to_download in changes_in_server["Additions"]:
                     self.gdrive.download_helper(to_download[0], to_download[1], to_download[2])
 
-                print("Finished pulling changes from Google Drive!")
+            if len(changes_in_server["Modifications"]):
+                print("============================================")
+                print("Starting modifications in local Filesystem:")
+                print("============================================")
+
+                for to_modify in changes_in_server["Modifications"]:
+                    self.filesystem.hard_delete_from_filesystem(to_modify[0])
+                    self.gdrive.download_helper(to_modify[0], to_modify[1], to_modify[2])
+
+                print("Finished modification changes from Google Drive!")
                 print("============================================")
 
             if len(changes_in_server["Deletions"]):
@@ -138,7 +151,7 @@ class GSpace:
         try:
             changes_in_local, changes_in_server, gdrive_tree, local_fs_tree = self.fetch(updateType="Google Drive")
 
-            if not changes_in_local["Additions"] and not changes_in_local["Deletions"]:
+            if not changes_in_local["Additions"] and not changes_in_local["Deletions"] and not changes_in_local["Modifications"]:
                 print("============================================")
                 print("No changes to push!\nExiting ...")
                 return print("============================================")
@@ -163,11 +176,23 @@ class GSpace:
                 print("Finished pushing changes to Google Drive!")
                 print("============================================")
 
+            if len(changes_in_server["Modifications"]):
+                print("============================================")
+                print("Starting modifications in Google Drive:")
+                print("============================================")
+
+                for to_modify in changes_in_server["Modifications"]:
+                    self.gdrive.delete_file(to_modify[1], gdrive_tree=gdrive_tree)
+                    self.gdrive.upload_helper(gdrive_tree, to_modify)
+
+                print("Finished modifications in Google Drive!")
+                print("============================================")
+
             if len(changes_in_local["Deletions"]):
                 print("============================================")
                 print("Starting removing files from Google Drive:")
                 for to_delete in changes_in_local["Deletions"]:
-                    self.gdrive.delete_file(to_delete[1])
+                    self.gdrive.delete_file(to_delete[1], gdrive_tree=gdrive_tree)
 
                 print("Finished removing files from Google Drive!")
                 print("============================================")

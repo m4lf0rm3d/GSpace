@@ -1,5 +1,6 @@
+import os
 class TreeNode:
-    def __init__(self, value, drive_id=None, isDir=None):
+    def __init__(self, value, drive_id=None, isDir=None, fileSize = 0):
         """
         Initialize a TreeNode.
 
@@ -12,6 +13,7 @@ class TreeNode:
         self.children = {}
         self.id = drive_id
         self.isDir = isDir
+        self.fileSize = fileSize
 
 
 class Tree:
@@ -21,7 +23,7 @@ class Tree:
         """
         self.root = None
 
-    def add(self, path, drive_id=None, isDir=None):
+    def add(self, path, drive_id=None, isDir=None, fileSize=0):
         """
         Add a node to the tree based on the given path.
 
@@ -31,11 +33,11 @@ class Tree:
         - isDir: Boolean indicating whether the node represents a directory.
         """
         if not self.root:
-            self.root = TreeNode(path[0], drive_id, isDir)
+            self.root = TreeNode(path[0], drive_id, isDir, fileSize)
         else:
-            self._add_recursive(self.root, path[1:], drive_id, isDir)
+            self._add_recursive(self.root, path[1:], drive_id, isDir, fileSize)
 
-    def _add_recursive(self, node, path, drive_id, isDir=None):
+    def _add_recursive(self, node, path, drive_id, isDir=None, fileSize=0):
         """
         Recursively add a node to the tree.
 
@@ -51,10 +53,10 @@ class Tree:
         current_value = path[0]
 
         if current_value in node.children:
-            self._add_recursive(node.children[current_value], path[1:], drive_id, isDir)
+            self._add_recursive(node.children[current_value], path[1:], drive_id, isDir, fileSize)
         else:
-            node.children[current_value] = TreeNode(current_value, drive_id, isDir)
-            self._add_recursive(node.children[current_value], path[1:], drive_id, isDir)
+            node.children[current_value] = TreeNode(current_value, drive_id, isDir, fileSize)
+            self._add_recursive(node.children[current_value], path[1:], drive_id, isDir, fileSize)
 
     def remove(self, path):
         """
@@ -97,7 +99,7 @@ class Tree:
         Returns:
         A dictionary containing lists of additions and deletions.
         """
-        changes_dic = {"Additions": [], "Deletions": []}
+        changes_dic = {"Additions": [], "Deletions": [], "Modifications": []}
 
         def compare_and_print_paths(node1, node2, current_path):
             """
@@ -123,6 +125,18 @@ class Tree:
                     changes_dic["Deletions"].append((final_path, change_node.id, change_node.isDir))
 
             for key in common_keys:
+                size_from_node_1 = node1.children[key].fileSize
+                size_from_node_2 = node2.children[key].fileSize
+
+                file_id_in_gdrive = node1.children[key].id
+                final_path = f"{'/'.join(current_path)}/{key}" if not current_path else f"/{'/'.join(current_path)}/{key}"
+
+                if(not file_id_in_gdrive): file_id_in_gdrive = node2.children[key].id
+                
+                if(not os.path.isdir(key) and int(size_from_node_1) != int(size_from_node_2)):
+                    
+                    changes_dic["Modifications"].append((final_path, file_id_in_gdrive, False))
+
                 compare_and_print_paths(node1.children[key], node2.children[key], current_path + [key])
 
         if self.root and tree2.root:
@@ -183,3 +197,16 @@ class Tree:
             return self._get_node(node.children[current_value], path[1:], nodes_traversed + 1)
         else:
             return node, nodes_traversed  # Return the current node and nodes traversed
+
+    def find_parent_node_by_id(self, file_id):
+        if self.root:
+            return self._find_parent_node_by_id(self.root, file_id)
+
+    def _find_parent_node_by_id(self,node, file_id):
+
+        for child in node.children:
+            if node.children[child].id == file_id: return node
+            result = self._find_parent_node_by_id(node.children[child], file_id)
+            if result:
+                return result
+        return None

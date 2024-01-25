@@ -69,7 +69,7 @@ class GoogleDriveHelper:
     def generate_tree_from_google_drive(self, tree_root, parent_id=ConfigurationManager.ROOT_FOLDER_ID, path=[]):
         try:
             results = self.service.files().list(q=f"parents in '{parent_id}'", pageSize=1000,
-                                                fields="nextPageToken, files(id, name, mimeType, trashed)").execute()
+                                                fields="nextPageToken, files(id, name, mimeType, trashed, size)").execute()
             items = results.get('files', [])
 
             for i, item in enumerate(items):
@@ -77,7 +77,7 @@ class GoogleDriveHelper:
                     if not item['trashed']: tree_root.add([self.ROOT_FOLDER_NAME] + path + [item['name']], item['id'], isDir=True)
                     if not item['trashed']: self.generate_tree_from_google_drive(tree_root, item['id'], path + [item['name']])
                 else:
-                    if not item['trashed']: tree_root.add([self.ROOT_FOLDER_NAME] + path + [item['name']], item['id'], isDir=False)
+                    if not item['trashed']: tree_root.add([self.ROOT_FOLDER_NAME] + path + [item['name']], item['id'], isDir=False, fileSize=item['size'])
         except Exception as e:
             # Log the error using the logger
             self.logger.error(f"Error occurred in generate_tree_from_google_drive: {e}")
@@ -199,10 +199,19 @@ class GoogleDriveHelper:
             # Raise the exception again to notify the caller about the error
             raise e
 
-    def delete_file(self, file_id):
+    def delete_file(self, file_id, gdrive_tree=None):
         try:
             body_value = {'trashed': True}
             self.service.files().update(fileId=file_id, body=body_value).execute()
+
+            parent_node_of_file = gdrive_tree.find_parent_node_by_id(file_id)
+            if parent_node_of_file:
+                for file_name in parent_node_of_file.children:
+                    if(parent_node_of_file.children[file_name].id == file_id):
+                        del parent_node_of_file.children[file_name]
+                        break
+
+
             print(f"File/Folder with ID {file_id} moved to trash successfully.")
         except Exception as e:
             # Log the error using the logger
