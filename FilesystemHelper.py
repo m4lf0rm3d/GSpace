@@ -46,7 +46,9 @@ class FilesystemHelper:
                         add_recursive(current_node + [child_value], item_path)
                     else:
                         # If it's a file, add it directly
-                        tree.add(current_node + [item])
+                        # Get Given File Size
+                        fileSize = os.path.getsize(item_path)
+                        tree.add(current_node + [item], fileSize=fileSize)
 
             # Start the traversal from the root of the tree
             add_recursive([root_value], self.FOLDER_PATH)
@@ -73,10 +75,12 @@ class FilesystemHelper:
             if os.path.exists(ConfigurationManager.LOCAL_FILESYSTEM_FOLDER_PATH + path):
                 dir_path = ConfigurationManager.BACKUP_FOLDER_PATH + "/" + datetime.now().strftime('%d-%m-%Y') + "/" + "/".join(path.split("/")[:-1])
                 os.makedirs(dir_path, exist_ok=True)
+
+
                 shutil.move(ConfigurationManager.LOCAL_FILESYSTEM_FOLDER_PATH + path, dir_path)
                 print("Deleted Successfully!")
                 print(f"Path: {ConfigurationManager.LOCAL_FILESYSTEM_FOLDER_PATH + path}")
-                print(f"Backup path: {dir_path}")
+                print(f"Backup path: {dir_path }")
             else:
                 print(f"Path does not exist: {ConfigurationManager.LOCAL_FILESYSTEM_FOLDER_PATH + path}")
 
@@ -85,6 +89,33 @@ class FilesystemHelper:
         except Exception as e:
             # Log the error using the logger
             self.logger.error(f"Error occurred in soft_delete_from_filesystem: {e}")
+            # Optionally, log the full traceback for detailed error information
+            self.logger.error(traceback.format_exc())
+            # Raise the exception again to notify the caller about the error
+            raise e
+
+    def hard_delete_from_filesystem(self, path):
+        """
+        Soft delete a file or directory from the filesystem.
+
+        Parameters:
+        - path: The path of the file or directory to be soft deleted.
+        """
+        try:
+
+            file_path = ConfigurationManager.LOCAL_FILESYSTEM_FOLDER_PATH + path
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print("Hard Deleted Successfully!")
+                print(f"Path: {file_path}")
+            else:
+                print(f"Path does not exist: {file_path}")
+
+            print("============================================")
+
+        except Exception as e:
+            # Log the error using the logger
+            self.logger.error(f"Error occurred in hard_delete_from_filesystem: {e}")
             # Optionally, log the full traceback for detailed error information
             self.logger.error(traceback.format_exc())
             # Raise the exception again to notify the caller about the error
