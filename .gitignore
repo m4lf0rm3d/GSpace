@@ -1,5 +1,6 @@
 credentials.json
-token.pickle
+token.*
 __pycache__/
 .idea/
 .idea
+settings.conf

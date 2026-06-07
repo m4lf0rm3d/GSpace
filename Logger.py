@@ -1,39 +1,36 @@
 import logging
+import os
 import ConfigurationManager
 from datetime import datetime
+from rich.console import Console
+
+_console = Console(stderr=True)
 
 class Logger:
     """
-    A simple logger class for logging information and errors to a file.
-
-    Usage:
-    logger = Logger()
-    logger.info("This is an information message.")
-    logger.error("This is an error message.")
+    File logger with rich-powered console output.
+    Writes structured .log files and prints coloured messages to stderr.
     """
 
-    logger = logging.getLogger(__name__)
-    file_handler = logging.FileHandler(ConfigurationManager.LOGS_FOLDER_PATH + "/" + datetime.now().strftime("%d-%m-%y") + ".log")
-    logger.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%d-%m-%y %I:%M:%S %p')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    file_handler.close()
+    def __init__(self):
+        log_dir  = ConfigurationManager.LOGS_FOLDER_PATH
+        os.makedirs(log_dir, exist_ok=True)
 
-    def info(self, message):
-        """
-        Log an information message.
+        log_file = os.path.join(log_dir, datetime.now().strftime("%d-%m-%y") + ".log")
 
-        Parameters:
-        - message: The information message to be logged.
-        """
-        self.logger.info(message)
+        self._logger = logging.getLogger(__name__ + log_file)
+        if not self._logger.handlers:
+            self._logger.setLevel(logging.INFO)
+            fh = logging.FileHandler(log_file)
+            fh.setFormatter(logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%d-%m-%y %I:%M:%S %p'
+            ))
+            self._logger.addHandler(fh)
 
-    def error(self, message):
-        """
-        Log an error message.
+    def info(self, message: str):
+        self._logger.info(message)
 
-        Parameters:
-        - message: The error message to be logged.
-        """
-        self.logger.error(message)
+    def error(self, message: str):
+        self._logger.error(message)
+        _console.print(f"[bold red]ERROR[/] {message}")

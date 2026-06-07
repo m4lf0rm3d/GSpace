@@ -1,267 +1,315 @@
 import sys
-import ConfigurationManager
 import traceback
+import ConfigurationManager
 from FilesystemHelper import FilesystemHelper
 from GoogleDriveHelper import GoogleDriveHelper
 from Logger import Logger
 from Tree import Tree
 
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+from rich import box
+from rich.columns import Columns
+from rich.rule import Rule
+from rich.prompt import Confirm
+
+_console = Console()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _changes_table(changes: dict, title: str) -> Table:
+    """Build a rich Table summarising a changes dictionary."""
+    table = Table(
+        title=title,
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+        border_style="dim",
+        expand=True,
+    )
+    table.add_column("Op", width=4, justify="center")
+    table.add_column("Path")
+    table.add_column("Type", width=9, justify="center")
+
+    for path, fid, is_dir in changes["Additions"]:
+        table.add_row(
+            "[green]+[/]",
+            f"[green]{path}[/]",
+            "[cyan]folder[/]" if is_dir else "[dim]file[/]",
+        )
+    for path, fid, is_dir in changes["Modifications"]:
+        table.add_row(
+            "[yellow]~[/]",
+            f"[yellow]{path}[/]",
+            "[cyan]folder[/]" if is_dir else "[dim]file[/]",
+        )
+    for path, fid, is_dir in changes["Deletions"]:
+        table.add_row(
+            "[red]−[/]",
+            f"[red]{path}[/]",
+            "[cyan]folder[/]" if is_dir else "[dim]file[/]",
+        )
+
+    return table
+
+
+def _summary_panel(changes: dict, label: str) -> Panel:
+    adds  = len(changes["Additions"])
+    mods  = len(changes["Modifications"])
+    dels  = len(changes["Deletions"])
+    total = adds + mods + dels
+
+    if total == 0:
+        text = Text("No changes", style="dim")
+    else:
+        text = Text()
+        if adds: text.append(f"  +{adds} add{'s' if adds != 1 else ''}  ", style="green")
+        if mods: text.append(f"  ~{mods} mod{'s' if mods != 1 else ''}  ", style="yellow")
+        if dels: text.append(f"  −{dels} del{'s' if dels != 1 else ''}  ", style="red")
+
+    return Panel(text, title=f"[bold]{label}[/]", border_style="dim", expand=True)
+
+
+def _header():
+    _console.print()
+    _console.print(
+        Panel(
+            f"[bold cyan]GSpace[/]  [dim]v{ConfigurationManager.APP_VERSION}[/]",
+            subtitle="[dim]Google Drive ↔ Local Filesystem[/]",
+            border_style="cyan",
+            expand=False,
+        )
+    )
+    _console.print()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GSpace
+# ──────────────────────────────────────────────────────────────────────────────
+
 class GSpace:
     """
-    GSpace is a utility for synchronizing files between the local filesystem and Google Drive.
+    GSpace — sync files between local filesystem and Google Drive.
 
     Usage:
-    gspace_instance = GSpace()
-    gspace_instance.pull()
-    gspace_instance.push()
-    gspace_instance.sync()
+        gspace = GSpace()
+        gspace.pull()
+        gspace.push()
+        gspace.sync()
     """
 
     logger = Logger()
 
     def __init__(self):
-        """
-        Initialize GSpace by creating instances of GoogleDriveHelper, FilesystemHelper, and initializing Google Drive service.
-        """
         try:
-            self.logger.info("Program Started")
-            self.gdrive = GoogleDriveHelper()
+            self.logger.info("Program started")
+            self.gdrive     = GoogleDriveHelper()
             self.filesystem = FilesystemHelper()
             self.gdrive.initialize_service()
         except Exception as e:
-            # Log the error using the logger
-            self.logger.error(f"Error occurred in GSpace initialization: {e}")
-            # Optionally, log the full traceback for detailed error information
-            self.logger.error(traceback.format_exc())
-            # Raise the exception again to notify the caller about the error
-            raise e
+            self.logger.error(f"Init error: {e}\n{traceback.format_exc()}")
+            raise
 
-    def fetch(self, updateType="Local Filesystem"):
+    # ------------------------------------------------------------------
+    # fetch
+    # ------------------------------------------------------------------
+
+    def fetch(self, update_type="Local Filesystem"):
         """
-        Fetch changes from Google Drive and local filesystem, and print the differences.
-
-        Parameters:
-        - updateType: Type of update, either "Local Filesystem" or "Google Drive".
+        Build both trees, diff them, and print a summary.
+        Returns (changes_in_local, changes_in_server, gdrive_tree, local_fs_tree).
         """
         try:
-            gdrive_tree, local_fs_tree = Tree(), Tree()
-            gdrive_tree.add([ConfigurationManager.ROOT_FOLDER_NAME], ConfigurationManager.ROOT_FOLDER_ID)
-            self.gdrive.generate_tree_from_google_drive(gdrive_tree)
-            self.filesystem.generate_tree_from_filesystem(local_fs_tree)
+            with _console.status("[bold cyan]Reading Google Drive…[/]", spinner="dots"):
+                gdrive_tree = Tree()
+                gdrive_tree.add(
+                    [ConfigurationManager.ROOT_FOLDER_NAME],
+                    ConfigurationManager.ROOT_FOLDER_ID
+                )
+                self.gdrive.generate_tree_from_google_drive(gdrive_tree)
 
-            changes_in_local = local_fs_tree.find_difference_path(gdrive_tree)
+            with _console.status("[bold cyan]Reading local filesystem…[/]", spinner="dots"):
+                local_fs_tree = Tree()
+                self.filesystem.generate_tree_from_filesystem(local_fs_tree)
+
+            changes_in_local  = local_fs_tree.find_difference_path(gdrive_tree)
             changes_in_server = gdrive_tree.find_difference_path(local_fs_tree)
-            print("============================================")
 
-            print("Following changes will take place in " + updateType)
+            _console.print(Rule("[bold]Pending changes[/]", style="dim"))
+            _console.print()
 
-            if updateType == "Local Filesystem":
-                print(f"Additions ({len(changes_in_server['Additions'])}):")
-                for change in changes_in_server["Additions"]: print("+", change[0])
-                print(f"Modifications ({len(changes_in_server['Modifications'])}):")
-                for change in changes_in_server["Modifications"]: print("*", change[0])
-                print(f"Deletions ({len(changes_in_server['Deletions'])}):")
-                for change in changes_in_server["Deletions"]: print("-", change[0])
+            if update_type == "Local Filesystem":
+                _console.print(
+                    Columns([
+                        _summary_panel(changes_in_server, "→ Local filesystem"),
+                    ], expand=True)
+                )
+                if any(changes_in_server.values()):
+                    _console.print(_changes_table(changes_in_server, "Changes coming from Google Drive"))
             else:
-                print(f"Additions ({len(changes_in_local['Additions'])}):")
-                for change in changes_in_local["Additions"]: print("+", change[0])
-                print(f"Modifications ({len(changes_in_local['Modifications'])}):")
-                for change in changes_in_server["Modifications"]: print("*", change[0])
-                print(f"Deletions ({len(changes_in_local['Deletions'])}):")
-                for change in changes_in_local["Deletions"]: print("-", change[0])
+                _console.print(
+                    Columns([
+                        _summary_panel(changes_in_local, "→ Google Drive"),
+                    ], expand=True)
+                )
+                if any(changes_in_local.values()):
+                    _console.print(_changes_table(changes_in_local, "Changes going to Google Drive"))
 
-                
-
-            print("============================================")
+            _console.print()
 
             return changes_in_local, changes_in_server, gdrive_tree, local_fs_tree
+
         except Exception as e:
-            # Log the error using the logger
-            self.logger.error(f"Error occurred in fetch: {e}")
-            # Optionally, log the full traceback for detailed error information
-            self.logger.error(traceback.format_exc())
-            # Raise the exception again to notify the caller about the error
-            raise e
+            self.logger.error(f"fetch error: {e}\n{traceback.format_exc()}")
+            raise
+
+    # ------------------------------------------------------------------
+    # pull
+    # ------------------------------------------------------------------
 
     def pull(self):
-        """
-        Pull changes from Google Drive to the local filesystem.
-        """
+        """Download changes from Google Drive to the local filesystem."""
         try:
-            changes_in_local, changes_in_server, gdrive_tree, local_fs_tree = self.fetch()
+            changes_local, changes_server, gdrive_tree, local_tree = self.fetch()
 
-            if not changes_in_server["Additions"] and not changes_in_server["Deletions"] and not changes_in_server["Modifications"]:
-                print("============================================")
-                print("No changes to pull!\nExiting ...")
-                return print("============================================")
+            if not any(changes_server.values()):
+                _console.print("[dim]Nothing to pull.[/]")
+                return
 
-            confirmation = ""
+            if not Confirm.ask("[bold]Apply these changes to local filesystem?[/]"):
+                _console.print("[dim]Canceled.[/]")
+                return
 
-            while confirmation not in ["yes", "no"]:
-                confirmation = input("Are you sure you want to continue? [yes, no]\n >>> ")
-                if confirmation not in ["yes", "no"]: print("Usage: 'yes' or 'no'")
+            _console.print()
 
-            if confirmation == "no":
-                print("============================================")
-                print("Canceled by user!\nExiting ...")
-                return print("============================================")
+            if changes_server["Additions"]:
+                _console.print(Rule("[green]Downloading additions[/]", style="dim"))
+                for path, fid, is_dir in changes_server["Additions"]:
+                    self.gdrive.download_helper(path, fid, is_dir)
 
-            if len(changes_in_server["Additions"]):
-                print("============================================")
-                print("Starting pulling changes from Google Drive:")
-                for to_download in changes_in_server["Additions"]:
-                    self.gdrive.download_helper(to_download[0], to_download[1], to_download[2])
+            if changes_server["Modifications"]:
+                _console.print(Rule("[yellow]Applying modifications[/]", style="dim"))
+                for path, fid, is_dir in changes_server["Modifications"]:
+                    self.filesystem.hard_delete_from_filesystem(path)
+                    self.gdrive.download_helper(path, fid, is_dir)
 
-            if len(changes_in_server["Modifications"]):
-                print("============================================")
-                print("Starting modifications in local Filesystem:")
-                print("============================================")
+            if changes_server["Deletions"]:
+                _console.print(Rule("[red]Removing deleted files[/]", style="dim"))
+                for path, fid, is_dir in changes_server["Deletions"]:
+                    self.filesystem.soft_delete_from_filesystem(path)
 
-                for to_modify in changes_in_server["Modifications"]:
-                    self.filesystem.hard_delete_from_filesystem(to_modify[0])
-                    self.gdrive.download_helper(to_modify[0], to_modify[1], to_modify[2])
-
-                print("Finished modification changes from Google Drive!")
-                print("============================================")
-
-            if len(changes_in_server["Deletions"]):
-                print("============================================")
-                print("Starting removing files in local Filesystem:")
-                for to_delete in changes_in_server["Deletions"]:
-                    self.filesystem.soft_delete_from_filesystem(to_delete[0])
-
-                print("Finished removing files from local Filesystem!")
-                print("============================================")
-
-            print("SUCCESS: Pulled Google Drive!")
-            self.logger.info("Pulled from google drive")
+            _console.print()
+            _console.print(Panel("[bold green]✓ Pull complete[/]", border_style="green", expand=False))
+            self.logger.info("Pull from Google Drive complete")
 
         except Exception as e:
-            # Log the error using the logger
-            self.logger.error(f"Error occurred in pull: {e}")
-            # Optionally, log the full traceback for detailed error information
-            self.logger.error(traceback.format_exc())
-            # Raise the exception again to notify the caller about the error
-            raise e
+            self.logger.error(f"pull error: {e}\n{traceback.format_exc()}")
+            raise
+
+    # ------------------------------------------------------------------
+    # push
+    # ------------------------------------------------------------------
 
     def push(self):
-        """
-        Push changes from the local filesystem to Google Drive.
-        """
+        """Upload local changes to Google Drive."""
         try:
-            changes_in_local, changes_in_server, gdrive_tree, local_fs_tree = self.fetch(updateType="Google Drive")
+            changes_local, changes_server, gdrive_tree, local_tree = self.fetch(update_type="Google Drive")
 
-            if not changes_in_local["Additions"] and not changes_in_local["Deletions"] and not changes_in_local["Modifications"]:
-                print("============================================")
-                print("No changes to push!\nExiting ...")
-                return print("============================================")
+            if not any(changes_local.values()):
+                _console.print("[dim]Nothing to push.[/]")
+                return
 
-            confirmation = ""
+            if not Confirm.ask("[bold]Apply these changes to Google Drive?[/]"):
+                _console.print("[dim]Canceled.[/]")
+                return
 
-            while confirmation not in ["yes", "no"]:
-                confirmation = input("Are you sure you want to continue? [yes, no]\n >>> ")
-                if confirmation not in ["yes", "no"]: print("Usage: 'yes' or 'no'")
+            _console.print()
 
-            if confirmation == "no":
-                print("============================================")
-                print("Canceled by user!\nExiting ...")
-                return print("============================================")
+            if changes_local["Additions"]:
+                _console.print(Rule("[green]Uploading additions[/]", style="dim"))
+                for item in changes_local["Additions"]:
+                    self.gdrive.upload_helper(gdrive_tree, item)
 
-            if len(changes_in_local["Additions"]):
-                print("============================================")
-                print("Starting pushing changes to Google Drive:")
-                for to_upload in changes_in_local["Additions"]:
-                    self.gdrive.upload_helper(gdrive_tree, to_upload)
+            if changes_server["Modifications"]:
+                _console.print(Rule("[yellow]Applying modifications[/]", style="dim"))
+                for path, fid, is_dir in changes_server["Modifications"]:
+                    self.gdrive.delete_file(fid, gdrive_tree=gdrive_tree)
+                    self.gdrive.upload_helper(gdrive_tree, (path, fid, is_dir))
 
-                print("Finished pushing changes to Google Drive!")
-                print("============================================")
+            if changes_local["Deletions"]:
+                _console.print(Rule("[red]Removing deleted files[/]", style="dim"))
+                for path, fid, is_dir in changes_local["Deletions"]:
+                    self.gdrive.delete_file(fid, gdrive_tree=gdrive_tree)
 
-            if len(changes_in_server["Modifications"]):
-                print("============================================")
-                print("Starting modifications in Google Drive:")
-                print("============================================")
-
-                for to_modify in changes_in_server["Modifications"]:
-                    self.gdrive.delete_file(to_modify[1], gdrive_tree=gdrive_tree)
-                    self.gdrive.upload_helper(gdrive_tree, to_modify)
-
-                print("Finished modifications in Google Drive!")
-                print("============================================")
-
-            if len(changes_in_local["Deletions"]):
-                print("============================================")
-                print("Starting removing files from Google Drive:")
-                for to_delete in changes_in_local["Deletions"]:
-                    self.gdrive.delete_file(to_delete[1], gdrive_tree=gdrive_tree)
-
-                print("Finished removing files from Google Drive!")
-                print("============================================")
-
-            print("SUCCESS: Pushing to Google Drive!")
-            self.logger.info("Pushed to Google Drive")
-
+            _console.print()
+            _console.print(Panel("[bold green]✓ Push complete[/]", border_style="green", expand=False))
+            self.logger.info("Push to Google Drive complete")
 
         except Exception as e:
-            # Log the error using the logger
-            self.logger.error(f"Error occurred in push: {e}")
-            # Optionally, log the full traceback for detailed error information
-            self.logger.error(traceback.format_exc())
-            # Raise the exception again to notify the caller about the error
-            raise e
+            self.logger.error(f"push error: {e}\n{traceback.format_exc()}")
+            raise
+
+    # ------------------------------------------------------------------
+    # sync
+    # ------------------------------------------------------------------
 
     def sync(self):
-        """
-        Synchronize changes between the local filesystem and Google Drive.
-        """
+        """Pull then push — full two-way sync."""
         try:
+            _console.print(Rule("[bold cyan]Pull phase[/]", style="cyan"))
             self.pull()
+            _console.print()
+            _console.print(Rule("[bold cyan]Push phase[/]", style="cyan"))
             self.push()
-
-            self.logger.info("Sync from Google Drive and Local System Completed")
-
+            _console.print()
+            _console.print(Panel("[bold green]✓ Sync complete[/]", border_style="green", expand=False))
+            self.logger.info("Sync complete")
         except Exception as e:
-            # Log the error using the logger
-            self.logger.error(f"Error occurred in sync: {e}")
-            # Optionally, log the full traceback for detailed error information
-            self.logger.error(traceback.format_exc())
-            # Raise the exception again to notify the caller about the error
-            raise e
+            self.logger.error(f"sync error: {e}\n{traceback.format_exc()}")
+            raise
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ──────────────────────────────────────────────────────────────────────────────
+
+COMMANDS = ("fetch", "pull", "push", "sync")
+
 
 def main():
+    _header()
+
+    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
+        _console.print(
+            Panel(
+                f"[bold]Usage:[/]  python3 GSpace.py [cyan]<command>[/]\n\n"
+                f"[bold]Commands:[/]  {', '.join(f'[cyan]{c}[/]' for c in COMMANDS)}",
+                title="[bold red]Invalid usage[/]",
+                border_style="red",
+                expand=False,
+            )
+        )
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
     try:
-        options = {
-            "fetch": "",
-            "pull": "",
-            "push": "",
-            "sync": ""
-        }
-
-        if len(sys.argv) != 2:
-            return print("Usage: python3 GSpace.py <command>")
-
-        if sys.argv[1] not in options.keys():
-            return print("Usage: python3 GSpace.py <command>\nCommands: fetch, pull, push, sync")
-
-        gspace_instance = GSpace()
-
-        options = {
-            "fetch": gspace_instance.fetch,
-            "pull": gspace_instance.pull,
-            "push": gspace_instance.push,
-            "sync": gspace_instance.sync
-        }
-
-        options[sys.argv[1]]()
-
-        gspace_instance.logger.info(f"SUCCESS: '{sys.argv[1]}'")
-
+        gspace = GSpace()
+        getattr(gspace, cmd)()
+        gspace.logger.info(f"SUCCESS: '{cmd}'")
+    except KeyboardInterrupt:
+        _console.print("\n[dim]Interrupted.[/]")
+        sys.exit(0)
     except Exception as e:
-        # Log the error using the logger
-        Logger().error(f"Error occurred in main: {e}")
-        # Optionally, log the full traceback for detailed error information
-        Logger().error(traceback.format_exc())
-        # Raise the exception again to notify the caller about the error
-        raise e
+        Logger().error(f"Fatal error in '{cmd}': {e}\n{traceback.format_exc()}")
+        _console.print_exception(show_locals=False)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
